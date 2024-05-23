@@ -4,7 +4,7 @@
   "description": "This is just an example of RESTful application built with Node.js, Express.js and MongoDB database.",
   "main": "app.js",
   "scripts": {
-    "start": "nodemon app.js"
+    "start": "nodemon --env-file=.env app.js"
   },
   "keywords": [],
   "author": "Rafal Borowski",
