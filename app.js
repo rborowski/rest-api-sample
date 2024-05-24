@@ -1,40 +1,49 @@
 const express = require("express");
 const bodyParser = require("body-parser");
+const mongoose = require("mongoose");
+
+//connect to database
+const mongoDB = `mongodb://${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`;
+
+mongoose.connect(mongoDB);
+
+const db = mongoose.connection;
+
+db.on("error", console.error.bind(console, "MongoDB connection error: "));
+
+const employeeSchema = new mongoose.Schema({
+  firstName: String,
+  lastName: String,
+  birthDate: String,
+  salaryGross: Number,
+  salaryNet: Number,
+  vatValue: Number,
+});
+
+const Employee = mongoose.model("Employee", employeeSchema);
 
 const app = express();
 app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({extended: false}))
+
 
 const PORT = process.env.PORT || 3000;
 
-const employees = [
-  {
-    id: 1,
-    firstName: "John",
-    lastName: "Doe",
-    birthDate: "1926-02-10",
-    salaryGross: 5432,
-    salryNet: 4416.26,
-    vatValue: 1015.74,
-  },
-  {
-    id: 2,
-    firstName: "Jane",
-    lastName: "Doe",
-    birthDate: "1939-10-06",
-    salaryGross: 6545,
-    salryNet: 5321.14,
-    vatValue: 1233.86,
-  },
-  {
-    id: 3,
-    firstName: "Frank",
-    lastName: "Doe",
-    birthDate: "1981-12-13",
-    salaryGross: 7345,
-    salryNet: 5971.54,
-    vatValue: 1373.46,
-  },
-];
+const vatRate = 0.23;
+
+function getSalaryNet(salaryGross, vatRate) {
+  return +((salaryGross / (1 + vatRate) ).toFixed(2));
+}
+
+function getSalaryGross(salaryNet, vatRate) {
+  return +((salaryNet * (1 + vatRate) ).toFixed(2));
+}
+
+function getVatValue(salaryGross, salaryNet) {
+  return +((salaryGross - salaryNet).toFixed(2));
+}
+
+// routes
 
 app.get("/", (req, res) => {
   const status = {
@@ -44,43 +53,93 @@ app.get("/", (req, res) => {
   res.json(status);
 });
 
-app.get("/employee/:id", (req, res) => {
-  const response = employees[parseInt(req.params.id) - 1];
+app.get("/employees", async (req, res) => {
 
-  res.json(response);
+  try {
+    const employees = await Employee.find();
+    res.status(201).json({ employees , message: "Success!" });
+  } catch (error) {
+    res.status(500).json({message: "Something went wrong, try again."});
+  }
+
 });
 
-app.post("/employee", (req, res) => {
-  console.log(req.body);
+app.get("/employees/:id", async (req, res) => {
 
-  const response = {
-    message: "Employee added.",
-    employee_id: 1,
-  };
+  try {
+    const employee = await Employee.findById(req.params.id);
+    res.status(201).json({ employee , message: "Success!" });
+  } catch (error) {
+    res.status(500).json({message: "Something went wrong, try again."});
+  }
 
-  res.json(response);
 });
 
-app.patch("/employee/:id", (req, res) => {
-  console.log(req.params.id);
-  console.log(req.body);
+app.post("/employees", async (req, res) => {
+  const { firstName, lastName, birthDate, salaryGross } = req.body;
 
-  const response = {
-    message: `updated employee: ${req.body.id}`,
-  };
+  if (!firstName || !lastName || !birthDate || !salaryGross) {
+    return res.status(400).json({message: 'Some fields left empty, try again' });
+  }
 
-  res.json(response);
+  const salaryNet = getSalaryNet(salaryGross, vatRate);
+  const vatValue = getVatValue(salaryGross, salaryNet);
+
+  const employee = new Employee({
+    firstName,
+    lastName,
+    birthDate,
+    salaryGross,
+    salaryNet,
+    vatValue,
+  });
+
+  try {
+    await employee.save();
+    res.status(201).json({ employee: employee._doc , message: "Success! New employee saved" });
+  } catch (error) {
+    res.status(500).json("Something went wrong, try again.");
+  }
 });
 
-app.delete("/employee/:id", (req, res) => {
-  console.log(req.params.id);
-  console.log(req.body);
+app.patch("/employees/:id", async (req, res) => {
+  let updatedData = req.body 
 
-  const response = {
-    message: `deleted employee: ${req.body.id}`,
-  };
+  if (req.body.salaryGross) {
+    const salaryNet = getSalaryNet(req.body.salaryGross, vatRate);
+    const vatValue = getVatValue(req.body.salaryGross, salaryNet);
+    
+    updatedData = {...req.body, salaryNet, vatValue}
 
-  res.json(response);
+  } else if (req.body.salaryNet) {
+    const salaryGross = getSalaryGross(req.body.salaryNet, vatRate);
+    const vatValue = getVatValue(salaryGross, req.body.salaryNet);
+
+    updatedData = {...req.body, salaryGross, vatValue}
+  }
+
+  try {
+    if(req.body.vatValue) {
+      throw new Error("Modifying vatValue is prohibited. ")
+    }
+
+    await Employee.findByIdAndUpdate(req.params.id, updatedData);
+    res.status(201).json({ message: "Success! Data updated" });
+  } catch (error) {
+    res.status(500).json({message: error + "Something went wrong, try again."});
+  }
+
+});
+
+app.delete("/employees/:id", async (req, res) => {
+
+  try {
+    await Employee.findByIdAndDelete(req.params.id);
+    res.status(201).json({ message: "Success! Data deleted" });
+  } catch (error) {
+    res.status(500).json({ message: "Something went wrong, try again."});
+  }
+
 });
 
 app.use((error, req, res, next) => {
